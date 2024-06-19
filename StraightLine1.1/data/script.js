@@ -1,5 +1,5 @@
-// Get current sensor readings when the page loads  
-window.addEventListener('load', getReadings);
+// // Get current sensor readings when the page loads  
+// window.addEventListener('load', getReadings);
 
 // Create Heading Gauge
 var headingGauge = new RadialGauge({
@@ -51,34 +51,51 @@ var headingGauge = new RadialGauge({
 }).draw();
   
 
+// Function to post updated wind direction
+// Function to post updated wind direction
+function updateWindDirection() {
+  var newWindDir = document.getElementById('new-wind-dir').value;
+  if (newWindDir === "" || isNaN(newWindDir) || newWindDir < 0 || newWindDir > 360) {
+    alert("Please enter a valid wind direction between 0 and 360 degrees.");
+    return;
+  }
 
-
-// Function to get current readings on the webpage when it loads for the first time
-function getReadings(){
   var xhr = new XMLHttpRequest();
+  xhr.open("POST", "/windDir?windDir=" + newWindDir, true);
   xhr.onreadystatechange = function() {
     if (this.readyState == 4 && this.status == 200) {
-      var myObj = JSON.parse(this.responseText);
-      console.log(myObj);
-      var heading = myObj.heading;
-      var windDir = myObj.windDir;
-      var targetDir = myObj.targetDir;
-      headingGauge.value = heading;
-     
-      
-      // Update heading value display
-      document.getElementById('heading-value').innerHTML = "<span>" + heading + "</span>";
-      
-      // Update wind direction value display
-      document.getElementById('windDirection-value').innerHTML = "<span>" + windDir + "</span>";
-
-      // Update target direction value display
-      document.getElementById('targetDirection-value').innerHTML = "<span>" + targetDir + "</span>";
+      console.log("Wind direction updated successfully.");
     }
-  }; 
-  xhr.open("GET", "/readings", true);
+  };
   xhr.send();
 }
+
+// // Function to get current readings on the webpage when it loads for the first time
+// function getReadings(){
+//   var xhr = new XMLHttpRequest();
+//   xhr.onreadystatechange = function() {
+//     if (this.readyState == 4 && this.status == 200) {
+//       var myObj = JSON.parse(this.responseText);
+//       console.log(myObj);
+//       var heading = myObj.heading;
+//       var windDir = myObj.windDir;
+//       var targetDir = myObj.targetDir;
+//       headingGauge.value = heading;
+     
+      
+//       // Update heading value display
+//       document.getElementById('heading-value').innerHTML = "<span>" + heading + "</span>";
+      
+//       // Update wind direction value display
+//       document.getElementById('windDirection-value').innerHTML = "<span>" + windDir + "</span>";
+
+//       // Update target direction value display
+//       document.getElementById('targetDirection-value').innerHTML = "<span>" + targetDir + "</span>";
+//     }
+//   }; 
+//   xhr.open("GET", "/readings", true);
+//   xhr.send();
+// }
 
 if (!!window.EventSource) {
   var source = new EventSource('/events');
@@ -105,12 +122,21 @@ if (!!window.EventSource) {
     
     
     // Update heading value display
-    document.getElementById('heading-value').innerHTML = "<span> Current Heading: " + myObj.heading + "</span>";
+    document.getElementById('heading-value').innerHTML = "<span> Current Heading: " + myObj.heading + "&deg;</span>";
     
     // Update wind direction value display
-    document.getElementById('windDirection-value').innerHTML = "<span> Wind Direction: " + myObj.windDir + "</span>";
+    document.getElementById('windDirection-value').innerHTML = "<span>" + myObj.windDir + "&deg;</span>";
 
     // Update target direction value display
-    document.getElementById('targetDirection-value').innerHTML = "<span> Target Heading: " + myObj.targetDir + "</span>";
+    document.getElementById('targetHeading-value').innerHTML = "<span> Target Heading: " + myObj.targetHeading + "&deg;</span>";
+
+    // Update heading tolerance value display
+    document.getElementById('headingTolerance-value').innerHTML = "<span> Heading Tolerance: " + myObj.headingTolerance + "&deg;</span>";
+
+    // Update current tack value display
+    document.getElementById('currentTack-value').innerHTML = "<span> Current Tack: " + myObj.currentTack + "</span>";
+
+    // Update current action value display
+    document.getElementById('currentAction-value').innerHTML = "<span> Current Action: " + myObj.currentAction + "</span>";
   }, false);
 }

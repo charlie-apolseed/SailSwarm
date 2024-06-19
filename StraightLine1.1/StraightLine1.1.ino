@@ -48,6 +48,7 @@ const int noGoZone = 45;  // Specified absolute value of the no-go zone. Determi
 bool onStarboard;         // Boolean representing the tack that the boat is on
 int targetAngle = -60;    // Target direction of travel with reference to the wind direction. Range of [-180:180] with positive values for port tack, negative for starboard.
 int targetHeading;
+char * curAction;
 int tolerance = 15;  // Tolerated range of headings (+- degrees specified here)
 
 int luffing[4];    // Too close to the wind direction
@@ -117,7 +118,14 @@ String getSensorReadings() {
   //TODO: IMPLEMENT FURTHER METRICS
   readings["heading"] = String(heading);
   readings["windDir"] = String(windDir);
-  readings["targetDir"] = String(targetHeading);
+  readings["targetHeading"] = String(targetHeading);
+  if (onStarboard) {
+    readings["currentTack"] = String(pointOfSailToString(pointOfSail)) + String(" (S)");
+  } else {
+    readings["currentTack"] = String(pointOfSailToString(pointOfSail)) + String(" (P)");
+  }
+  readings["headingTolerance"] = String(tolerance);
+  readings["currentAction"] = String(curAction);
   String jsonString = JSON.stringify(readings);
   return jsonString;
 }
@@ -184,10 +192,28 @@ void setup() {
 
   server.serveStatic("/", LittleFS, "/");  //Serve static pages (css, js)
 
+  // For sending data
   server.on("/readings", HTTP_GET, [](AsyncWebServerRequest *request) {  // Request for the latest sensor readings
     String json = getSensorReadings();
     request->send(200, "application/json", json);
     json = String();
+  });
+
+  // Handle POST requests to /update-windDir
+  server.on("/windDir", HTTP_POST, [](AsyncWebServerRequest *request) {
+    String newDir;
+    if (request->hasParam("windDir")) {
+      newDir = request->getParam("windDir")->value();
+      int windDirection = newDir.toInt();
+
+      Serial.print("Received new wind direction: ");
+      Serial.println(windDirection);
+      windDir = windDirection;
+
+      request->send(200, "text/plain", "Wind direction updated successfully.");
+    } else {
+      request->send(400, "text/plain", "Invalid request");
+    }
   });
 
   events.onConnect([](AsyncEventSourceClient *client) {
@@ -261,14 +287,17 @@ void loop() {
       if (onStarboard) {
         if ((heading > luffing[0] && heading < luffing[1]) || (heading > luffing[2] && heading < luffing[3])) {  //SAILING TOO HIGH. NEED TO BEAR OFF
           Serial.println("I'm luffing, bearing off now!");
+          curAction = "Bearing Off";
           rudderPos = 90 - adjustmentAngle;
           rudderServo.write(rudderPos);
         } else if ((heading > offCourse[0] && heading < offCourse[1]) || (heading > offCourse[2] && heading < offCourse[3])) {  //SAILING OFF COURSE. NEED TO HEAD UP
           Serial.println("I'm sailing too deep, heading up now!");
+          curAction = "Heading Up";
           rudderPos = 90 + adjustmentAngle;
           rudderServo.write(rudderPos);
         } else if (rudderPos != 90) {
           rudderPos = 90;
+          curAction = "Straight";
           rudderServo.write(rudderPos);
         }
       }
@@ -276,14 +305,17 @@ void loop() {
       else {
         if ((heading > luffing[0] && heading < luffing[1]) || (heading > luffing[2] && heading < luffing[3])) {  //SAILING TOO HIGH. NEED TO BEAR OFF
           Serial.println("I'm luffing, bearing off now!");
+          curAction = "Bearing Off";
           rudderPos = 90 + adjustmentAngle;
           rudderServo.write(rudderPos);
         } else if ((heading > offCourse[0] && heading < offCourse[1]) || (heading > offCourse[2] && heading < offCourse[3])) {  //SAILING OFF COURSE. NEED TO HEAD UP
           Serial.println("I'm sailing too deep, heading up now!");
+          curAction = "Heading Up";
           rudderPos = 90 - adjustmentAngle;
           rudderServo.write(rudderPos);
         } else if (rudderPos != 90) {
           rudderPos = 90;
+          curAction = "Straight";
           rudderServo.write(rudderPos);
         }
       }

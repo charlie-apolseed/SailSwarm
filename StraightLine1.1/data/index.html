@@ -1,27 +1,50 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <title>SailSwarm Dashboard</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link rel="icon" type="image/png" href="favicon.png">
-    <link rel="stylesheet" type="text/css" href="style.css">
-    <script src="http://cdn.rawgit.com/Mikhus/canvas-gauges/gh-pages/download/2.1.7/all/gauge.min.js"></script>
-  </head>
-  <body>
-    <div class="topnav">
-      <h1>SailSwarm Dashboard</h1>
-    </div>
-    <div class="content">
-      <div class="card-grid">
-        <div class="card">
-          <p class="card-title">Heading</p>
-          <canvas id="heading-gauge"></canvas>
-          <p class="heading-value" id="heading-value"><span></span></p>
-          <p class="windDirection-value" id="windDirection-value"><span></span></p>
-          <p class="targetDirection-value" id="targetDirection-value"><span></span></p>
-        </div>
+
+<head>
+  <title>SailSwarm Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="stylesheet" type="text/css" href="style.css">
+  <script src="http://cdn.rawgit.com/Mikhus/canvas-gauges/gh-pages/download/2.1.7/all/gauge.min.js"></script>
+</head>
+
+<body>
+  <div class="topnav">
+    <h1>SailSwarm Dashboard</h1>
+  </div>
+  <div class="content">
+    <div class="card-grid">
+      <div class="card">
+        <p class="card-title">Heading</p>
+        <canvas id="heading-gauge"></canvas>
+        <p class="heading-value" id="heading-value" style="font-size: 25px;"><span>100&deg;</span></p>
+      </div>
+      <div class="card">
+        <p class="card-title">Wind Direction</p>
+        <p>Current Wind Direction: </p>
+        <p class="windDirection-value" id="windDirection-value" style="font-size: 50px;"><span>100&deg;</span></p>
+        <br>
+        <br>
+        <input type="number" id="new-wind-dir" placeholder="Enter New Wind Direction" min="0" max="360" style="width: 200px; border-radius: 5px;">
+        <br>
+        <br>
+        <button onclick="updateWindDirection()">Update Wind Direction</button>
+      </div>
+      <div class="card">
+        <p class="card-title">Status</p>
+        <p class="targetHeading-value" id="targetHeading-value" style="font-size: 25px;"><span>Target Heading: 100&deg;</span></p>
+        <br>
+        <p class="headingTolerance-value" id="headingTolerance-value" style="font-size: 25px;"><span>Heading Tolerance: 15&deg;</span></p>
+        <br>
+        <p class="currentTack-value" id="currentTack-value" style="font-size: 25px;"><span>Current Tack: Beam Reach (S)</span></p>
+        <br>
+        <p class="currentAction-value" id="currentAction-value" style="font-size: 25px;"><span>Current Action: Bearing Off</span></p>
       </div>
     </div>
-    <script src="script.js"></script>
-  </body>
+  
+  </div>
+  <script src="script.js"></script>
+</body>
+
 </html>
