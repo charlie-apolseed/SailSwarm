@@ -20,21 +20,27 @@ Author: Charlie Apolinsky
 #include <ESPAsyncWebServer.h>
 #include "LittleFS.h"
 #include <Arduino_JSON.h>
+#include <boat_config.h>
+
+#define I2C_SDA 33
+#define I2C_SCL 32
+
 
 MPU9250 mpu;
 
-Servo rudderServo;
-int rudderPos = 90;        // variable to store the servo position. 90 represents centered rudder, 0 represents all the way to port, 180 all the way to starboard.
-const int rudderPin = 18;  // attach rudder servo to pin 18
 
-Servo trimServo;
-int trimPos = 90;
-const int trimPin = 17;  // attach sail servo to pin 17
+
+//Vars for RC control
+bool manualControl = true;
+
+int rudderPos = centeredRudder;  // variable to store the servo position. 135 represents centered rudder
+int trimPos = closeHauledTrim;          //The current trim of the sail
+
 
 const char *ssid = "Cyber-Physical-Systems";  //Replace with the wifi SSID
 const char *password = "Torweg-Sisal2-Hm";    //Replace with the wifi Pass
 
-const int adjustmentAngle = 20;  // Angle to put the rudder at when adjusting heading
+const int adjustmentAngle = 30;  // Angle to put the rudder at when adjusting heading
 const int tackingAngle = 45;     // Angle to put the rudder at when completing a tack
 
 float pitch;
@@ -44,11 +50,12 @@ float heading;  // The heading of the boat, given in 360 degrees
 int counter = 1;
 
 int windDir = 50;         // Wind direction, input manually based on readings from wind vane
+int windSpeed = 5; // Wind speed in knots. This is used for calculating time spent during tacks in upwind sailing
 const int noGoZone = 45;  // Specified absolute value of the no-go zone. Determined through experimentation and dependent on boat.
 bool onStarboard;         // Boolean representing the tack that the boat is on
-int targetAngle = -60;    // Target direction of travel with reference to the wind direction. Range of [-180:180] with positive values for port tack, negative for starboard.
+int targetAngle = 0;    // Target direction of travel with reference to the wind direction. Range of [-180:180] with positive values for port tack, negative for starboard.
 int targetHeading;
-char * curAction;
+char *curAction;
 int tolerance = 15;  // Tolerated range of headings (+- degrees specified here)
 
 int luffing[4];    // Too close to the wind direction
@@ -135,20 +142,23 @@ String getSensorReadings() {
 void setup() {
   Serial.begin(115200);
   initLittleFS();
-  Wire.begin();
+  Wire.begin(I2C_SDA, I2C_SCL);
   delay(2000);
 
   //Init servos
   ESP32PWM::allocateTimer(0);
   ESP32PWM::allocateTimer(1);
-  ESP32PWM::allocateTimer(2);
-  ESP32PWM::allocateTimer(3);
   rudderServo.setPeriodHertz(50);  // standard 50 hz servo
   rudderServo.attach(rudderPin, 500, 2300);
-  rudderServo.write(90);
+  rudderServo.write(centeredRudder);
   trimServo.setPeriodHertz(50);  // standard 50 hz servo
   trimServo.attach(trimPin, 500, 2300);
-  trimServo.write(90);
+  trimServo.write(closeHauledTrim);
+
+
+  configureRCPins();
+  setCenteredRudder(115);
+  setTrimConditions(50, 140);
 
   //Init ESP32
   if (!mpu.setup(0x68)) {  // change to your own address
@@ -183,6 +193,10 @@ void setup() {
   // load from eeprom
   loadCalibration();
 
+  /*******
+//
+//
+//
   connectToWiFi();
 
   //Init Webserver
@@ -227,18 +241,28 @@ void setup() {
   server.addHandler(&events);
 
   server.begin();  // Start server
+//
+//
+//
+*******/
 }
 
 
 
 void loop() {
+  /******
   if ((millis() - lastTime) > timerDelay) {
     // Send Events to the client with the Sensor Readings Every .5 seconds
     events.send("ping", NULL, millis());
     events.send(getSensorReadings().c_str(), "new_readings", millis());
     lastTime = millis();
   }
-  if (mpu.update()) {
+  *******/
+  if (manualControl) {
+    Serial.println("IN RC MODE");
+    processRC();
+    switchManualControl();
+  } else if (mpu.update()) {
     static uint32_t prev_ms = millis();
     if (millis() > prev_ms + 100) {
       pitch = mpu.getPitch();
@@ -264,17 +288,18 @@ void loop() {
       trimServo.write(trimPos);  //Trim the sail to the appropriate angle to maximize speed.
 
       //Check to see if the attempted path is in the no-go zone.
-      if (pointOfSail == NO_GO_ZONE) {
+      if (abs(targetAngle) <= noGoZone) {
         /*Transform the target heading into segments of close-hauled sailing 
         (sailing as close as possible to the wind while still maintaining a fast speed). 
-        Default time on each tack is 30 seconds (ratio is adjusted depending on desired angle).*/
+        Default time on each tack is 10 seconds (ratio is adjusted depending on desired angle).*/
         float headingRatio = targetAngle / 45.0;
-        int timeOnPort = 300 + (300 * headingRatio);
-        int timeOnStarboard = 300 - (300 * headingRatio);
+        int tackLength = 100;
+        int timeOnPort = tackLength + (tackLength * headingRatio);
+        int timeOnStarboard = tackLength - (tackLength * headingRatio);
 
-        if ((counter % 600) == timeOnStarboard || (counter % 600) == 0) {
+        if ((counter % (2 * tackLength)) == timeOnStarboard || (counter % (2 * tackLength)) == 0) {
           executeTack();
-        } else if ((counter % 600) > timeOnStarboard) {
+        } else if ((counter % (2 * tackLength)) > timeOnStarboard) {
           set_heading_tolerance(noGoZone + tolerance, tolerance);
         } else {
           set_heading_tolerance(-1 * (noGoZone + tolerance), tolerance);
@@ -288,15 +313,15 @@ void loop() {
         if ((heading > luffing[0] && heading < luffing[1]) || (heading > luffing[2] && heading < luffing[3])) {  //SAILING TOO HIGH. NEED TO BEAR OFF
           Serial.println("I'm luffing, bearing off now!");
           curAction = "Bearing Off";
-          rudderPos = 90 - adjustmentAngle;
+          rudderPos = centeredRudder + adjustmentAngle;
           rudderServo.write(rudderPos);
         } else if ((heading > offCourse[0] && heading < offCourse[1]) || (heading > offCourse[2] && heading < offCourse[3])) {  //SAILING OFF COURSE. NEED TO HEAD UP
           Serial.println("I'm sailing too deep, heading up now!");
           curAction = "Heading Up";
-          rudderPos = 90 + adjustmentAngle;
+          rudderPos = centeredRudder - adjustmentAngle;
           rudderServo.write(rudderPos);
-        } else if (rudderPos != 90) {
-          rudderPos = 90;
+        } else if (rudderPos != centeredRudder) {
+          rudderPos = centeredRudder;
           curAction = "Straight";
           rudderServo.write(rudderPos);
         }
@@ -306,15 +331,15 @@ void loop() {
         if ((heading > luffing[0] && heading < luffing[1]) || (heading > luffing[2] && heading < luffing[3])) {  //SAILING TOO HIGH. NEED TO BEAR OFF
           Serial.println("I'm luffing, bearing off now!");
           curAction = "Bearing Off";
-          rudderPos = 90 + adjustmentAngle;
+          rudderPos = centeredRudder - adjustmentAngle;
           rudderServo.write(rudderPos);
         } else if ((heading > offCourse[0] && heading < offCourse[1]) || (heading > offCourse[2] && heading < offCourse[3])) {  //SAILING OFF COURSE. NEED TO HEAD UP
           Serial.println("I'm sailing too deep, heading up now!");
           curAction = "Heading Up";
-          rudderPos = 90 - adjustmentAngle;
+          rudderPos = centeredRudder + adjustmentAngle;
           rudderServo.write(rudderPos);
-        } else if (rudderPos != 90) {
-          rudderPos = 90;
+        } else if (rudderPos != centeredRudder) {
+          rudderPos = centeredRudder;
           curAction = "Straight";
           rudderServo.write(rudderPos);
         }
@@ -323,12 +348,41 @@ void loop() {
       print_info();  //For use when connected via usb
       counter += 1;
       prev_ms = millis();
+      switchManualControl();
     }
   }
 }
 
+/* For when the user wants to use remote control */
+void processRC() {
+  ch_3 = pulseIn(CH_3_PIN, HIGH, 25000);
+  ch_1 = pulseIn(CH_1_PIN, HIGH, 25000);
+  delay(20);
+  rudderPos = map(ch_1, 1245, 1845, centeredRudder - tackingAngle, centeredRudder + tackingAngle);
+  trimPos = map(ch_3, 940, 2120, closeHauledTrim, runningTrim);
+  rudderServo.write(rudderPos);
+  trimServo.write(trimPos);
+}
 
-
+/* Detects if the user wants to switch to manual control */
+void switchManualControl() {
+  ch_4 = pulseIn(CH_4_PIN, HIGH, 25000);
+  delay(20);
+  if (ch_4 > 1800) {
+    for (int i = 0; i < 50; i++) {
+      ch_4 = pulseIn(CH_4_PIN, HIGH, 25000);
+      if (ch_4 < 1800) {
+        return;
+      }
+      delay(20);
+    }
+    if (manualControl == true) {
+      manualControl = false;
+    } else {
+      manualControl = true;
+    }
+  }
+}
 
 
 /*
@@ -357,8 +411,6 @@ Helper function to take the current point of sail and set the appropriate trim a
 */
 void setSailTrim() {
   PointOfSail pos = pointOfSail;
-  int closeHauledTrim = 0;  //Assuming that for the RC boat servo, the closehauled trim is when the servo is set to 0.
-  int runningTrim = 180;    //Assuming that for the RC boat servo, the running trim is when the servo is set to 180.
   int sailTrimIncrement = (runningTrim - closeHauledTrim) / 4;
   switch (pointOfSail) {
     case CLOSE_HAULED:
@@ -368,13 +420,13 @@ void setSailTrim() {
       trimPos = closeHauledTrim;
       return;
     case CLOSE_REACH:
-      trimPos = sailTrimIncrement;
+      trimPos = closeHauledTrim + sailTrimIncrement;
       return;
     case BEAM_REACH:
-      trimPos = 2 * sailTrimIncrement;
+      trimPos = closeHauledTrim + 2 * sailTrimIncrement;
       return;
     case BROAD_REACH:
-      trimPos = 3 * sailTrimIncrement;
+      trimPos = closeHauledTrim + 3 * sailTrimIncrement;
       return;
     case RUNNING:
       trimPos = runningTrim;
@@ -455,22 +507,22 @@ void set_heading_tolerance(int targetAngle, int tolerance) {
 Helper function to execute a tack. Assumes that the boat has sufficient speed to make it through the no-go zone.
 */
 void executeTack() {
-  //Length of tack in seconds
-  int tackDelay = 10;
+  //Length of tack in 1/10 seconds. The delay is 5 seconds for 5 knots of wind.
+  int tackDelay = (5 / windSpeed) * 50;
   int tackDelayCounter = 0;
   if (onStarboard) {
-    rudderPos = 90 + tackingAngle;
+    rudderPos = centeredRudder - tackingAngle;
     rudderServo.write(rudderPos);
     Serial.println("Tacking from starboard to port!");
     //Working under the assumption that the tack takes about 10 seconds to complete. Ultimately, this will be dependent on wind and boat speed.
   } else {
     //Put the rudder all the way to port, perhaps trim sail slightly as this is done.
-    rudderPos = 90 - tackingAngle;
+    rudderPos = centeredRudder + tackingAngle;
     rudderServo.write(rudderPos);
     Serial.println("Tacking from port to starboard!");
     //Working under the assumption that the tack takes about 10 seconds to complete. Ultimately, this will be dependent on wind and boat speed.
   }
-  while (tackDelayCounter < tackDelay * 10) {
+  while (tackDelayCounter < tackDelay) {
     tackDelayCounter += 1;
     mpu.update();
     pitch = mpu.getPitch();
@@ -506,11 +558,13 @@ Helper function to print the current information about the boat.
 void print_info() {
   Serial.print("Wind: ");
   Serial.print(windDir);
-  Serial.print("  Target angle:");
-  Serial.print(targetAngle);
+  Serial.print("  Target heading:");
+  Serial.print(targetHeading);
   Serial.print(" Heading: ");
   Serial.print(heading, 2);
-  Serial.print("\t Luffing: [");
+  Serial.print(" Trim pos: ");
+  Serial.print(trimPos);
+  Serial.print(" Luffing: [");
   for (int i = 0; i < 4; i++) {
     Serial.print(luffing[i]);
     if (i < 3) Serial.print(", ");
@@ -520,46 +574,13 @@ void print_info() {
     Serial.print(offCourse[i]);
     if (i < 3) Serial.print(", ");
   }
-  Serial.print("]\t Current Tack: ");
+  Serial.print("] Current Tack: ");
   if (onStarboard) {
-    Serial.print("Starboard (S), ");
+    Serial.print("(S), ");
   } else {
-    Serial.print("Port (P), ");
+    Serial.print("(P), ");
   }
   Serial.println(pointOfSailToString(pointOfSail));
 }
 
-/*
-Helper function to print the information when a callibration is completed.
-*/
-void print_calibration() {
-  Serial.println("< calibration parameters >");
-  Serial.println("accel bias [g]: ");
-  Serial.print(mpu.getAccBiasX() * 1000.f / (float)MPU9250::CALIB_ACCEL_SENSITIVITY);
-  Serial.print(", ");
-  Serial.print(mpu.getAccBiasY() * 1000.f / (float)MPU9250::CALIB_ACCEL_SENSITIVITY);
-  Serial.print(", ");
-  Serial.print(mpu.getAccBiasZ() * 1000.f / (float)MPU9250::CALIB_ACCEL_SENSITIVITY);
-  Serial.println();
-  Serial.println("gyro bias [deg/s]: ");
-  Serial.print(mpu.getGyroBiasX() / (float)MPU9250::CALIB_GYRO_SENSITIVITY);
-  Serial.print(", ");
-  Serial.print(mpu.getGyroBiasY() / (float)MPU9250::CALIB_GYRO_SENSITIVITY);
-  Serial.print(", ");
-  Serial.print(mpu.getGyroBiasZ() / (float)MPU9250::CALIB_GYRO_SENSITIVITY);
-  Serial.println();
-  Serial.println("mag bias [mG]: ");
-  Serial.print(mpu.getMagBiasX());
-  Serial.print(", ");
-  Serial.print(mpu.getMagBiasY());
-  Serial.print(", ");
-  Serial.print(mpu.getMagBiasZ());
-  Serial.println();
-  Serial.println("mag scale []: ");
-  Serial.print(mpu.getMagScaleX());
-  Serial.print(", ");
-  Serial.print(mpu.getMagScaleY());
-  Serial.print(", ");
-  Serial.print(mpu.getMagScaleZ());
-  Serial.println();
-}
+
