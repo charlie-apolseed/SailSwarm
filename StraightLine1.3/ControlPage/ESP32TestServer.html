@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Sail Swarm</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background: #f0f8ff;
+        }
+
+        .header {
+            width: 100%;
+            background: #e9ecef;
+            color: #fff;
+            text-align: center;
+            padding: 20px 0;
+            margin-bottom: 20px;
+        }
+
+        .header h1 {
+            font-size: 36px;
+            margin: 0;
+        }
+
+        .wrapper {
+            display: flex;
+            justify-content: space-around;
+            width: 100%;
+        }
+
+        .container {
+            background: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            width: 30%;
+            box-sizing: border-box;
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+
+        label {
+            display: block;
+            margin: 10px 0 5px;
+        }
+
+        input {
+            width: calc(100% - 22px);
+            padding: 10px;
+            margin-bottom: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+
+        button {
+            width: 100%;
+            margin-top: 10px;
+            padding: 10px;
+            background: #007bff;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        button:hover {
+            background: #0056b3;
+        }
+
+        #boatInfo {
+            margin-top: 20px;
+            padding: 10px;
+            background: #e9ecef;
+            border-radius: 4px;
+        }
+    </style>
+    <script>
+        function updateTackingDetails() {
+            const newTackLength = document.getElementById("tackLengthInput").value;
+            const newNoGoZone = document.getElementById("noGoZoneInput").value;
+
+            if (newNoGoZone === "" && newTackLength === "") {
+                alert("Please enter at least one field.");
+                return;
+            }
+
+            const xhr = new XMLHttpRequest();
+            const url = "http://192.168.4.1/post";
+
+            xhr.open("POST", url, true);
+            xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+
+            xhr.onreadystatechange = function () {
+                if (xhr.readyState === 4 && xhr.status === 200) {
+                    alert("Response from ESP32: " + xhr.responseText);
+                }
+            };
+
+            let params = "";
+
+            if (newTackLength !== "") {
+                params += "newTackLength=" + newTackLength;
+            }
+            if (newNoGoZone !== "") {
+                params += "newNoGoZone=" + newNoGoZone;
+            }
+
+            xhr.send(params);
+        }
+
+        function sendPostRequest() {
+            const newWindDir = document.getElementById("windDirInput").value;
+            const newTargetHeading = document.getElementById("targetHeadingInput").value;
+            const newTargetAngle = document.getElementById("targetAngleInput").value;
+            const newWindSpeed = document.getElementById("windSpeedInput").value;
+
+            if (newWindDir === "" && newTargetAngle === "" && newTargetHeading === "" && newWindSpee === "") {
+                alert("Please enter at least one field.");
+                return;
+            }
+
+            const xhr = new XMLHttpRequest();
+            const url = "http://192.168.4.1/post";
+
+            xhr.open("POST", url, true);
+            xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+
+            xhr.onreadystatechange = function () {
+                if (xhr.readyState === 4 && xhr.status === 200) {
+                    alert("Response from ESP32: " + xhr.responseText);
+                }
+            };
+
+            let params = "";
+            if (newWindDir !== "") {
+                params += "newWindDir=" + newWindDir;
+            }
+            if (newWindSpeed !== "") {
+                if (params !== "") params += "&";
+                params += "newWindSpeed=" + newWindSpeed;
+            }
+            if (newTargetHeading !== "") {
+                if (params !== "") params += "&";
+                params += "newTargetHeading=" + newTargetHeading;
+            } else if (newTargetAngle !== "") {
+                if (params !== "") params += "&";
+                params += "newTargetAngle=" + newTargetAngle;
+            }
+            xhr.send(params);
+        }
+
+        function submitCoordinates() {
+
+            const pointB = document.getElementById("pointBInput").value;
+
+            if (!validateCoordinates(pointB)) {
+                alert("Please enter valid coordinates in the format x,y");
+                return;
+            }
+
+            const xhr = new XMLHttpRequest();
+            const url = "http://192.168.4.1/coords";
+
+            xhr.open("POST", url, true);
+            xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+
+            xhr.onreadystatechange = function () {
+                if (xhr.readyState === 4 && xhr.status === 200) {
+                    alert("Response from ESP32: " + xhr.responseText);
+                }
+            };
+
+            let params = "pointB=" + pointB;
+            xhr.send(params);
+        }
+
+        function validateCoordinates(coords) {
+            // Pattern to match latitude and longitude within their respective bounds
+            // const pattern = "/^-?([1-8]?\d(\.\d+)?|90(\.0+)?),\s*-?(1[0-7]?\d(\.\d+)?|180(\.0+)?)$/";
+            // return pattern.test(coords);
+            return true;
+        }
+
+
+        function switchStationKeeping() {
+            const xhr = new XMLHttpRequest();
+            const url = "http://192.168.4.1/post";
+
+            xhr.open("POST", url, true);
+            xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+
+            xhr.onreadystatechange = function () {
+                if (xhr.readyState === 4 && xhr.status === 200) {
+                    alert("Response from ESP32: " + xhr.responseText);
+                    isManualControl = false;
+
+                }
+            };
+            xhr.send("stationKeeping=true");
+        }
+
+
+
+        function switchControl() {
+            const xhr = new XMLHttpRequest();
+            const url = "http://192.168.4.1/post";
+
+            xhr.open("POST", url, true);
+            xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+
+            xhr.onreadystatechange = function () {
+                if (xhr.readyState === 4 && xhr.status === 200) {
+                    alert("Response from ESP32: " + xhr.responseText);
+
+
+                }
+            };
+
+            xhr.send("switchControl=true");
+        }
+
+
+
+        function fetchBoatInfo() {
+            const xhr = new XMLHttpRequest();
+            const url = "http://192.168.4.1/info"; // Replace with your ESP32 IP address
+            const timeout = 1000; // Set timeout duration to 1 second
+
+            xhr.open("GET", url, true);
+
+            // Set up a timeout
+            const timer = setTimeout(() => {
+                document.getElementById("connectivityWarning").style.display = "block"; // Show the warning message
+            }, timeout);
+
+            xhr.onreadystatechange = function () {
+                if (xhr.readyState === 4) {
+                    clearTimeout(timer); // Clear the timeout if the response is received
+                    if (xhr.status === 200) {
+                        const response = JSON.parse(xhr.responseText);
+                        document.getElementById("boatInfo").innerHTML = `
+                    <h2>Mode: <span>${response.mode}</span></h2>
+                    <strong>Current Action: </strong> ${response.curAction}</br>
+                    <br>
+                    <strong>Wind Direction:</strong> ${response.windDir}&deg;<br>
+                    <strong>Wind Speed:</strong> ${response.windSpeed} knots<br>
+                    <br>
+                    <strong>Target Heading:</strong> ${response.targetHeading}&deg;<br>
+                    <strong>Target Angle:</strong> ${response.targetAngle}&deg;<br>
+                    <br>
+                    <strong>Speed: </strong>${response.currentSpeed}<br>
+                    <strong>Heading:</strong> ${response.heading}&deg; <strong>GPS Heading: </strong> ${response.gpsHeading}&deg; <br>
+                    <strong>Delta: </strong>${response.heading - response.gpsHeading}&deg;<br>
+                    <br>
+                    <strong>Rudder Position:</strong> ${response.rudderPos}<br>
+                    <strong>Current Tack:</strong> ${response.currentTack}<br>
+                    <strong>Point of Sail:</strong> ${response.pointOfSail}<br>
+                    <strong>Trim Position:</strong> ${response.trimPos}<br>
+                    <br>
+                    <strong>Lat, Lng: </strong> (${response.lat}, ${response.lng})<br>
+                `;
+                        document.getElementById("connectivityWarning").style.display = "none"; // Hide the warning message
+                    } else {
+                        document.getElementById("connectivityWarning").innerText = "Error fetching boat info";
+                    }
+                }
+            };
+
+            xhr.send();
+        }
+
+        setInterval(fetchBoatInfo, 500); // Fetch boat info every 0.5 seconds
+    </script>
+</head>
+
+<body>
+    <div class="header">
+        <h1>SailSwarm</h1>
+    </div>
+    <div class="wrapper">
+        <div class="container">
+            <h1>Point to Point</h1>
+            <form onsubmit="event.preventDefault(); submitCoordinates();">
+                <label for="pointBInput">Target Coordinates (Lat,Lng: e.g., 47.694815,9.193047):</label>
+                <input type="text" id="pointBInput" name="pointB" placeholder="e.g., 47.694815,9.193047">
+                <button type="submit">Submit Coordinates</button>
+            </form>
+            <h2>Toggle Control</h2>
+            <button id="autonomousControlButton" onclick="switchControl()">Switch Control Mode</button>
+            <h2>Toggle Station Keeping</h2>
+            <button id="stationKeepingControlButton" onclick="switchStationKeeping()">Toggle Station Keeping</button>
+        </div>
+        <div class="container">
+            <h1>Update Wind or Heading</h1>
+            <form onsubmit="event.preventDefault(); sendPostRequest();">
+                <label for="windDirInput">New Wind Direction:</label>
+                <input type="number" id="windDirInput" name="newWindDir" min="0" max="360">
+                <label for="windSpeedInput">New Wind Speed:</label>
+                <input type="number" id="windSpeedInput" name="newWindSpeed" min="0" max="99">
+                <label for="targetAngleInput">New Target Angle:</label>
+                <input type="number" id="targetAngleInput" name="targetAngle" min="-180" max="180">
+                <label for="targetHeadingInput">New Target Heading:</label>
+                <input type="number" id="targetHeadingInput" name="targetHeading" min="0" max="360">
+                <button type="submit">Submit</button>
+            </form>
+        </div>
+        <div class="container">
+            <h1>Information</h1>
+            <div id="boatInfo">
+                <h2>Mode: Pending</h2>
+                <strong>Current Action: </strong>Pending <br>
+                <br>
+                <strong>Wind Direction: </strong>Pending<br>
+                <strong>Wind Speed: </strong>Pending<br>
+                <br>
+                <strong>Target Heading:</strong> Pending<br>
+                <strong>Target Angle:</strong> Pending<br>
+                <br>
+                <strong>Speed: </strong>Pending<br>
+                <strong>Heading:</strong> Pending&deg; <strong>GPS Heading: </strong> Pending&deg; <br>
+                <strong>Delta: </strong>Pending<br>
+                <br>
+                <strong>Rudder Position:</strong> Pending<br>
+                <strong>Current Tack:</strong> Pending<br>
+                <strong>Point of Sail:</strong> Pending <br>
+                <strong>Trim Position:</strong> Pending<br>
+                <br>
+                <strong>Lat, Lng: </strong> (Pending, Pending)<br>
+            </div>
+        </div>
+    </div>
+    <div class="wrapper">
+        <div class="container" style="width: 90%; margin-top: 20px;">
+            <h1 style="margin-top: 0; margin-bottom: 5px;">Tacking Specifications</h1>
+            <form onsubmit="event.preventDefault; updateTackingDetails();"
+                style="display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex;">
+                    <label for="tackLengthInput">New Tack Length (200 &asymp; 20sec):</label>
+                    <input type="number" id="tackLengthInput" name="newTackLength" min="0" max="999"
+                        style="width: 50px; margin-left: 20px;">
+                </div>
+                <div style="display: flex;">
+                    <label for="noGoZoneInput">New No-Go-Zone Angle:</label>
+                    <input type="number" id="noGoZoneInput" name="newNoGoZone" min="0" max="179"
+                        style="width: 50px; margin-left: 20px;">
+                </div>
+                <button type="submit" style="width: 100px;">Submit</button>
+            </form>
+        </div>
+    </div>
+    <div id="connectivityWarning"
+        style="display: none; width: 100%; text-align: center; background: #ffcc00; color: #333; padding: 10px; position: fixed; bottom: 0;">
+        Connectivity wavering
+    </div>
+</body>
+
+</html>
