@@ -26,15 +26,12 @@ Author: Charlie Apolinsky
 #define I2C_SDA 33
 #define I2C_SCL 32
 
-
 MPU9250 mpu;
-
 // Create a TinyGPS++ object
 TinyGPSPlus gps;
 
 // Set up hardware serial
 HardwareSerial mySerial(1);  // Using UART1 on ESP32
-
 
 const char *ssid = "ESP32-Access-Point";
 const char *password = "123456789";
@@ -51,14 +48,18 @@ int trimPos = closeHauledTrim;   //The current trim of the sail
 float roll;
 float yaw;
 float heading;          // The heading of the boat, given in 360 degrees found through the IMU
-float gpsHeading; //The heading found using the gps library
+float gpsHeading;       //The heading found using the gps library
 int trueTargetHeading;  //The current heading the boat is targeting
+int headingAdjustment = 270;
 
-float currentSpeed; //The current speed of the boat in m/s found through GPS
-float averageSpeed = 3; //Calculated using a simple exponential moving average
-float alpha = 0.2;
+double distanceToDestination;  //distance to the next target for point to point
+double courseToDestination;    //heading to the next target for point to point
 
-int counter = 1;        //Counter used for autonomous sailing
+float currentSpeed;      //The current speed of the boat in m/s found through GPS.
+float averageSpeed = 3;  //Calculated using a simple exponential moving average.
+float alpha = 0.2;       //parameter for determining how responsive the moving average for the speed is.
+
+int counter = 1;  //Counter used for autonomous sailing
 
 bool onStarboard;  // Boolean representing the tack that the boat is on
 char *curAction;
@@ -81,15 +82,15 @@ void setup() {
   setCenteredRudder(115);
   setWindDir(0);
   setWindSpeed(5);
-  setTrimConditions((50 + (20 / windSpeed)), 140);
-  setNoGoZone(20 + (20 / windSpeed));
-  setTolerance(15);
+  setTrimConditions(30, 140);
+  setBasicNoGoZone(20);
+  setHeadingTolerance(8);
+  setPointToPointTolerance(10);
   setTackingAngle(45);
-  setTackLength(200);
+  setBasicTackLength(200);
   setAdjustmentAngle(30);
   setTargetHeading(290);
   setHeelingThreshold(20);
-  setGpsTolerance(0.0001);  //Roughly 10m tolerance. Since we are working at a relatively low latitude, we use the same tolerance for both coordinates. At higher latitudes, these should be set seperately. See https://gis.stackexchange.com/questions/2951/algorithm-for-offsetting-a-latitude-longitude-by-some-amount-of-meters to learn about how to go from meters to lat/lng adjustments.
   trueTargetHeading = targetHeading;
 
   //Init ESP32
@@ -119,23 +120,23 @@ void setup() {
     String message;
 
     if (request->hasParam("pointB", true)) {
-      String pointBCoords = request->getParam("pointB", true)->value();
-      int commaIndexB = pointBCoords.indexOf(',');
-      float yCoordB = pointBCoords.substring(0, commaIndexB).toFloat();
-      float xCoordB = pointBCoords.substring(commaIndexB + 1).toFloat();
-      setXCoordPointB(xCoordB);
-      setYCoordPointB(yCoordB);
+      String newCoords = request->getParam("pointB", true)->value();
+      int commaIndexB = newCoords.indexOf(',');
+      double newCoordLat = newCoords.substring(0, commaIndexB).toDouble();
+      double newCoordLng = newCoords.substring(commaIndexB + 1).toDouble();
+      addCoordinate(newCoordLat, newCoordLng);
       setMode("PTP");
-      message = "Target coordinates set to: (" + pointBCoords + ")\n";
+      message = "(" + newCoords + ") was added to the targets list.\n Current target is: (" + getCurrentTarget().lat + "," + getCurrentTarget().lng + ").";
     } else {
       message = "No coordinates were recieved.";
     }
-
-
-    Serial.println(pointToPointHeading());
-    setTargetHeading(pointToPointHeading());
-
-
+    //Get and set the course to the target destination
+    courseToDestination = TinyGPSPlus::courseTo(
+      gps.location.lat(),
+      gps.location.lng(),
+      getCurrentTarget().lat,
+      getCurrentTarget().lng);
+    setTargetHeading(courseToDestination);
 
     AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", message);
     response->addHeader("Access-Control-Allow-Origin", "*");
@@ -149,15 +150,17 @@ void setup() {
 
     if (request->hasParam("noGoZone", true)) {
       int newNoGoZone = request->getParam("noGoZone", true)->value().toInt();
-      message = "No-go-zone was changed from " + String(noGoZone) + " to " + String(newNoGoZone) + ".\n";
-      setNoGoZone(newNoGoZone);
+      int previousNoGoZone = noGoZone;
+      setBasicNoGoZone(newNoGoZone);
+      message = "No-go-zone was changed from " + String(previousNoGoZone) + " to " + String(noGoZone) + ".\n";
       bool updated = true;
     }
 
     if (request->hasParam("tackLength", true)) {
       int newTackLength = request->getParam("tackLength", true)->value().toInt();
-      message += "tackLength was changed from " + String(tackLength) + " to " + String(newTackLength) + ".\n";
-      setTackLength(newTackLength);
+      int previousTackLength = tackLength;
+      setBasicTackLength(newTackLength);
+      message += "tackLength was changed from " + String(previousTackLength) + " to " + String(tackLength) + ".\n";
       bool updated = true;
     }
 
@@ -172,6 +175,7 @@ void setup() {
     request->send(response);
   });
 
+
   // Send a POST request to <IP>/post with form fields newWindDir and newTargetAngle or for switching control
   server.on("/post", HTTP_POST, [](AsyncWebServerRequest *request) {
     String message = "";
@@ -184,9 +188,9 @@ void setup() {
       updateTargetAngle();
       message += "New wind direction set to: " + String(newWindDir) + ".\n";
       updated = true;
-    } 
+    }
 
-    if (request->hasParam("windSpeed", true)) {
+    if (request->hasParam("newWindSpeed", true)) {
       int newWindSpeed = request->getParam("newWindSpeed", true)->value().toInt();
       message += "Wind speed was changed from " + String(windSpeed) + " to " + String(newWindSpeed) + ".\n";
       setWindSpeed(newWindSpeed);
@@ -206,7 +210,14 @@ void setup() {
       setMode("A");
       message = "New target angle set to: " + String(newTargetAngle);
       updated = true;
-    } 
+    }
+
+    if (request->hasParam("headingAdjustment", true)) {
+      int newHeadingAdjustment = request->getParam("headingAdjustment", true)->value().toInt();
+      headingAdjustment = newHeadingAdjustment;
+      message += "New heading adjustment: " + String(headingAdjustment) + "\n";
+      updated = true;
+    }
 
     if (request->hasParam("switchControl", true)) {
       updated = true;
@@ -223,11 +234,27 @@ void setup() {
         setMode("RC");
         message = "Terminating Station Keeping. Now in RC mode";
       } else {
+        setCurrentTarget(getCurrentPosition().lat, getCurrentPosition().lng);
         setMode("SK");
         message = "Beginning Station Keeping";
       }
+    } else if (request->hasParam("pointToPoint", true)) {
+      updated = true;
+      if (pointToPoint) {
+        setMode("RC");
+        message = "Terminating Point to Point. Now in RC mode";
+      } else {
+        setMode("PTP");
+        message = "Resuming Station Keeping";
+      }
     }
 
+    if (request->hasParam("clearTargetCoordinates", true)) {
+      updated = true; 
+      message = "Targets list was cleared";
+      clearCoordinatesList();
+    }
+ 
     if (!updated) {
       message = "Nothing was updated or changed.";
     }
@@ -260,8 +287,8 @@ void loop() {
       //UPDATE MPU
       roll = mpu.getPitch();
       yaw = mpu.getYaw();
-      // Adjust yaw to get real world heading
-      heading = yaw + 295.0;
+      // Adjust yaw to get real world heading.
+      heading = yaw + headingAdjustment;
       // Normalize heading to be within 0 to 360 degrees
       if (heading >= 360.0) {
         heading -= 360.0;
@@ -270,31 +297,19 @@ void loop() {
       }
 
       //PROCESS GPS INFORMATION
-      while (mySerial.available() > 0) {
-        char c = mySerial.read();
-        gps.encode(c);
-      }
-
-      currentSpeed = gps.speed.mps();
-      averageSpeed = (currentSpeed * alpha) + (averageSpeed * (1 - alpha));
-      gpsHeading = gps.course.deg();
-
-      setXCoordPointA(gps.location.lng());
-      setYCoordPointA(gps.location.lat());
-
-
-
+      processGPS();
 
       if (!manualControl) {
         printInfo();
         if (pointToPoint) {  //POINT TO POINT MODE
-          if (atDestination()) {
-            setMode("SK");
-          } else {
-            setTargetHeading(pointToPointHeading());
-          }
+          atDestination();
         } else if (stationKeeping) {  //STATION KEEPING MODE
-          sailInLoop();
+          if (distanceToDestination >= stationKeepingTolerance) {
+            addCoordinate(getCurrentTarget().lat, getCurrentTarget().lng);
+            setMode("PTP");
+          } else {
+            sailInLoop();
+          }
         }  //SAIL AUTONOMOUSLY
         handleTrim();
         checkForValidPath();
@@ -303,7 +318,6 @@ void loop() {
         printInfo();
         counter += 1;
       } else {
-
         processRC();
       }
       switchManualControl();
@@ -312,30 +326,68 @@ void loop() {
   }
 }
 
+/*Updates the location, speed, point-to-point target heading, and point-to-point distance*/
+void processGPS() {
+  while (mySerial.available() > 0) {
+    char c = mySerial.read();
+    gps.encode(c);
+  }
+  distanceToDestination =
+    TinyGPSPlus::distanceBetween(
+      gps.location.lat(),
+      gps.location.lng(),
+      getCurrentTarget().lat,
+      getCurrentTarget().lng);
+  courseToDestination =
+    TinyGPSPlus::courseTo(
+      gps.location.lat(),
+      gps.location.lng(),
+      getCurrentTarget().lat,
+      getCurrentTarget().lng);
+  currentSpeed = gps.speed.mps();
+  averageSpeed = (currentSpeed * alpha) + (averageSpeed * (1 - alpha));
+  gpsHeading = gps.course.deg();
+
+  setCurrentPosition(gps.location.lat(), gps.location.lng());
+}
+
+/*Checks to see if the boat is at the next target coordinate. If this is the last target, it will enter station keeping mode. If it is not at the target, it sets the proper heading to reach it. */
+void atDestination() {
+  if (distanceToDestination <= pointToPointTolerance) {
+    if (updateCoordinatesList()) {
+      Serial.println("FINAL target reached");
+      setMode("SK");
+      return;
+    }
+    Serial.println("Target reached");
+  }
+  setTargetHeading(courseToDestination);
+  return;
+}
+
 /* Has the boat sail in an infinity circle */
 void sailInLoop() {
-  static int loopLength = 200;  // Total length of the loop (in 1/10 seconds)
-  static float loopScale = loopLength / 200;
+  int loopLength = 200 + (200 / windSpeed);  // Total length of the loop (units are roughly 1/10 seconds)
   int loopCount = counter % loopLength;
-  if (loopCount < (70 * loopScale)) {
-    setTargetAngle(60);
-  } else if (loopCount < (75 * loopScale)) {
+  if (loopCount < (.3 * loopLength)) {
+    setTargetAngle(50);
+  } else if (loopCount < (.35 * loopLength)) {
     setTargetAngle(90);
-  } else if (loopCount < (80 * loopScale)) {
+  } else if (loopCount < (.4 * loopLength)) {
     setTargetAngle(160);
-  } else if (loopCount < (90 * loopScale)) {
+  } else if (loopCount < (.45 * loopLength)) {
     setTargetAngle(-160);
-  } else if (loopCount < (100 * loopScale)) {
+  } else if (loopCount < (.5 * loopLength)) {
     setTargetAngle(-90);
-  } else if (loopCount < (170 * loopScale)) {
-    setTargetAngle(-60);
-  } else if (loopCount < (175 * loopScale)) {
+  } else if (loopCount < (.8 * loopLength)) {
+    setTargetAngle(-50);
+  } else if (loopCount < (.85 * loopLength)) {
     setTargetAngle(-90);
-  } else if (loopCount < (180 * loopScale)) {
+  } else if (loopCount < (.9 * loopLength)) {
     setTargetAngle(-160);
-  } else if (loopCount < (190 * loopScale)) {
+  } else if (loopCount < (.95 * loopLength)) {
     setTargetAngle(160);
-  } else if (loopCount < (200 * loopScale)) {
+  } else if (loopCount < (loopLength)) {
     setTargetAngle(90);
   }
 }
@@ -355,12 +407,12 @@ void checkForValidPath() {
         counter = counter - 1;
       }
     } else if ((counter % (2 * tackLength)) > timeOnStarboard) {
-      set_heading_tolerance(noGoZone + tolerance, tolerance);
+      set_heading_tolerance(noGoZone + headingTolerance, headingTolerance);
     } else {
-      set_heading_tolerance(-1 * (noGoZone + tolerance), tolerance);
+      set_heading_tolerance(-1 * (noGoZone + headingTolerance), headingTolerance);
     }
   } else {
-    set_heading_tolerance(targetAngle, tolerance);
+    set_heading_tolerance(targetAngle, headingTolerance);
   }
 }
 
@@ -513,18 +565,18 @@ void setSailTrim() {
 /*
 Helper function to determine what the range of acceptable headings are for a given course and tolerance. 
 */
-void set_heading_tolerance(int targetAngle, int tolerance) {
+void set_heading_tolerance(int targetAngle, int headingTolerance) {
   int luffingBoundary;
   int offCourseBoundary;
   trueTargetHeading = (windDir + targetAngle) % 360;
   if (trueTargetHeading < 0) trueTargetHeading += 360;
   if (targetAngle < 0) {  // ON STARBOARD TACK
     onStarboard = true;
-    offCourseBoundary = (trueTargetHeading - tolerance) % 360;
+    offCourseBoundary = (trueTargetHeading - headingTolerance) % 360;
     if (offCourseBoundary < 0) offCourseBoundary += 360;
-    luffingBoundary = (trueTargetHeading + tolerance) % 360;
+    luffingBoundary = (trueTargetHeading + headingTolerance) % 360;
 
-    if (trueTargetHeading > 360 - tolerance) {  //NW target heading, NE luffing boundary and wind
+    if (trueTargetHeading > 360 - headingTolerance) {  //NW target heading, NE luffing boundary and wind
       luffing[0] = luffingBoundary;
       luffing[1] = windDir;
       luffing[2] = INT_MAX;
@@ -563,10 +615,10 @@ void set_heading_tolerance(int targetAngle, int tolerance) {
     }
   } else {  // ON PORT TACK
     onStarboard = false;
-    offCourseBoundary = (trueTargetHeading + tolerance) % 360;
-    luffingBoundary = (trueTargetHeading - tolerance) % 360;
+    offCourseBoundary = (trueTargetHeading + headingTolerance) % 360;
+    luffingBoundary = (trueTargetHeading - headingTolerance) % 360;
     if (luffingBoundary < 0) luffingBoundary += 360;
-    if (trueTargetHeading < tolerance) {  //NE targetHeading, NW wind and luffing boundary
+    if (trueTargetHeading < headingTolerance) {  //NE targetHeading, NW wind and luffing boundary
       luffing[0] = windDir;
       luffing[1] = luffingBoundary;
       luffing[2] = INT_MAX;
@@ -610,15 +662,14 @@ void set_heading_tolerance(int targetAngle, int tolerance) {
 Helper function to execute a tack. Assumes that the boat has sufficient speed to make it through the no-go zone.
 */
 void executeTack() {
-
   if (onStarboard) {
     rudderPos = centeredRudder - tackingAngle;
-    set_heading_tolerance(noGoZone + tolerance, tolerance);
+    set_heading_tolerance(noGoZone + headingTolerance, headingTolerance);
     rudderServo.write(rudderPos);
   } else {
     //Put the rudder all the way to port, perhaps trim sail slightly as this is done.
     rudderPos = centeredRudder + tackingAngle;
-    set_heading_tolerance(-1 * (noGoZone + tolerance), tolerance);
+    set_heading_tolerance(-1 * (noGoZone + headingTolerance), headingTolerance);
     rudderServo.write(rudderPos);
   }
   while (!handleSteering()) {
@@ -740,6 +791,8 @@ Helper function to print the current information about the boat.
 */
 void printInfo() {
   String info;
+  info += "roll: ";
+  info += String(roll, 2);
   info += "Wind: ";
   info += windDir;
   info += "  Target heading: ";
@@ -766,7 +819,7 @@ void printInfo() {
   }
   info += pointOfSailToString(pointOfSail);
   info += "Lat, Lng: (";
-  info += String(getXCoordPointA(), 6) + "," + String(getYCoordPointA(), 6) + ")";
+  info += String(getCurrentPosition().lat, 6) + "," + String(getCurrentPosition().lng, 6) + ")";
   Serial.println(info);
 }
 
@@ -774,8 +827,8 @@ void printInfo() {
 String formatInfo() {
   DynamicJsonDocument doc(1024);
 
-  doc["lat"] = String(getXCoordPointA(), 7);
-  doc["lng"] = String(getYCoordPointA(), 7);
+  doc["lat"] = String(getCurrentPosition().lat, 7);
+  doc["lng"] = String(getCurrentPosition().lng, 7);
 
   doc["windDir"] = windDir;
   doc["windSpeed"] = windSpeed;
@@ -783,12 +836,17 @@ String formatInfo() {
   doc["targetAngle"] = targetAngle;
   doc["targetHeading"] = trueTargetHeading;
 
+  doc["coordinatesList"] = getCoordinatesList();
+  doc["currentTarget"] = "(" + String(getCurrentTarget().lat, 6) + "," + String(getCurrentTarget().lng, 6) + ")";
+
+  doc["distanceToDestination"] = String(distanceToDestination / 1000, 6);
+  doc["GPSCourseToDestination"] = String(courseToDestination, 6);
   doc["rudderPos"] = rudderPos;
   doc["trimPos"] = trimPos;
   doc["heading"] = String(heading, 2);
   doc["currentTack"] = onStarboard ? "S" : "P";
   doc["currentSpeed"] = String(currentSpeed, 2);
-  doc["gpsHeading"] = String(gpsHeading, 2);
+  doc["avgSpeed"] = String(averageSpeed, 2);
   doc["pointOfSail"] = pointOfSailToString(pointOfSail);
   if (manualControl) {
     doc["mode"] = "Remote Control";

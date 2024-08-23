@@ -29,10 +29,17 @@ int runningTrim = 140;     // servo position for running trim.
 int windDir = 50;          // Wind direction, input manually based on readings from wind vane
 int windSpeed = 5;         // Wind speed in knots. This is used for calculating time spent during tacks in upwind sailing
 int noGoZone = 25;         // Specified absolute value of the no-go zone. Determined through experimentation and dependent on boat.
-int tolerance = 15;        // Tolerated range of headings (+- degrees specified here)
+int basicNoGoZone = 25;    // Absolute value of the no-go zone prior to adjustments based on wind speed.
+int headingTolerance = 15;        // Tolerated range of headings (+- degrees specified here)
+
+int pointToPointTolerance = 10; //Tolerated radius of acceptance for reaching point-to-point destination. Units are meters. 
+int stationKeepingTolerance = 25; //Tolerated radius of acceptance for station keeping. When this range is exceeded, it will sail back to the initial target point. This must be greater than pointToPointTolerance. Units are meters.
+
 int adjustmentAngle = 30;  // Angle to put the rudder at when adjusting heading
 int tackingAngle = 45;     // Angle to put the rudder at when completing a tack
 int tackLength = 200; //The amount of time the boat sails on a given tack before executing a maneuver
+int basicTackLength = 200; // Time spent on a given tack prior to adjustments based on wind speed.
+
 int targetAngle = 0;  // Target direction of travel with reference to the wind direction. Range of [-180:180] with positive values for port tack    
 int targetHeading = 0;  // Target heading of the boat.
 int sailEaseAmount = 0; //Amount to ease the sail past the initial trims when heeling. 
@@ -68,6 +75,14 @@ void setTargetHeading(int newTargetHeading) {
   }
 }
 
+/**
+Sets the new acceptance radius for points during point-to-point navigation;
+
+  @param newTolerance the new tolerance in meters;
+*/
+void setPointToPointTolerance(int newTolerance) {
+  pointToPointTolerance = newTolerance;
+}
 
 /**
       Sets the target angle and updates the target heading as well
@@ -115,39 +130,70 @@ void setTackingAngle(int newTackingAngle) {
 }
 
 /**
-  Sets the tack length
-
-  @param length the new time the boat should be on a given tack. 200 cooresponds to roughly 20 seconds.
+  Sets the tack length. ACCOUNTS FOR WINDSPEED
 */
-void setTackLength(int length) {
-  tackLength = length;
+void setTackLength() {
+  tackLength = basicTackLength + (200 / windSpeed); //TODO: fine tune the windspeed effect
 }
 
 /**
-  Sets the new tolerance value
+  Sets the basic tack length without accounting for the wind. Then calls setTackLength to make this adjustment. 
 
-  @param newTolerance the new value for the tolerance
+  @param newBasicTackLength the new time the boat should be on a given tack. 200 cooresponds to roughly 20 seconds.
 */
-void setTolerance(int newTolerance) {
-  tolerance = newTolerance;
+void setBasicTackLength(int newBasicTackLength) {
+  basicTackLength = newBasicTackLength;
+  setTackLength();
 }
 
 /**
-  Sets the new no-go zone
+  Sets the new headingTolerance value
 
-  @param newZone the new value for the no-go zone
+  @param newTolerance the new value for the headingTolerance
 */
-void setNoGoZone(int newZone) {
-  noGoZone = newZone;
+void setHeadingTolerance(int newTolerance) {
+  headingTolerance = newTolerance;
 }
 
 /**
-  Sets the new speed of the wind
+  Sets the new no-go-zone. ACCOUNTS FOR WINDSPEED
+*/
+void setNoGoZone() {
+  noGoZone = basicNoGoZone + (20 / windSpeed); //TODO: fine tune the windspeed effect
+}
+
+/**
+  Sets the basic no-go-zone without accounting for the wind speed. Then calls setNoGoZone to make this adjustment. 
+
+  @param newBasicNoGoZone the absolute angle of one side of the no-go zone. 
+*/
+void setBasicNoGoZone(int newBasicNoGoZone) {
+  basicNoGoZone = newBasicNoGoZone;
+  setNoGoZone();
+}
+
+
+/** Used for setting the servo positions for the trim boundaries. ACCOUNTS FOR WINDSPEED
+
+    @param closeHauled the new servo position for closehauled trim
+    @param running the new servo position for running trim
+*/
+void setTrimConditions(int closeHauled, int running) {
+  closeHauledTrim = closeHauled + (windSpeed / 2); //TODO Fine tune the effect of windSpeed
+  runningTrim = running;
+}
+
+/**
+  Sets the new speed of the wind. Updates noGoZone, trim conditions, and tack length to account for the change. 
 
   @param newSpeed the speed of the wind in knots
 */
 void setWindSpeed(int newSpeed) {
+  int previousWindSpeed = windSpeed;
   windSpeed = newSpeed;
+  setNoGoZone();
+  setTackLength();
+  setTrimConditions((closeHauledTrim - (previousWindSpeed / 2)), runningTrim);
 }
 
 /**
@@ -159,17 +205,6 @@ void setWindDir(int newDir) {
   windDir = newDir;
 }
 
-
-/** Used for setting the servo positions for the trim boundaries 
-
-    @param closeHauled the new servo position for closehauled trim
-    @param running the new servo position for running trim
-*/
-void setTrimConditions(int closeHauled, int running) {
-  closeHauledTrim = closeHauled;
-  runningTrim = running;
-}
-
 /** Gets the amount the sail should be eased */
 int getSailEaseAmount() {
   return sailEaseAmount;
@@ -177,13 +212,13 @@ int getSailEaseAmount() {
 
 /** Increases the amount the sail should be eased */
 void increaseSailEase() {
-  sailEaseAmount += 5;
+  sailEaseAmount += 10;
 }
 
 /** Decreases the amount the sail should be eased */
 void decreaseSailEase() {
   if (sailEaseAmount > 0) {
-    sailEaseAmount += -5;
+    sailEaseAmount += -10;
   }
 }
 
